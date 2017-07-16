@@ -10,14 +10,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
+
+	_ "myitcv.io/go/updateenv"
 )
 
-const (
-	FilenameGOPATH  = "._gopath"
-	DirectoryVendor = "_vendor"
-)
+var debug = false
 
 func main() {
 	// find the _second_ uniq go executable in PATH; the first is assumed to be
@@ -29,6 +27,12 @@ func main() {
 	// PATH... switch instead to logic that requires something that answers `go
 	// whyenv` first... followed and then finds the next go executable in PATH
 	// that does _not_ answer `go whyenv`
+
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "-debug" {
+		debug = true
+		args = args[1:]
+	}
 
 	pathList := filepath.SplitList(os.Getenv("PATH"))
 
@@ -54,62 +58,11 @@ func main() {
 		pathList = npathList
 	}
 
-	// default value; we need to re-implement the $HOME/go logic here in case any vendors
-	// need to be added to the GOPATH
-	gopath, ok := os.LookupEnv("GOPATH")
-	if !ok {
-		// TODO this is probably not as strong as it could be
-		gopath = os.Getenv("HOME")
-	}
+	argv := append([]string{rgp}, args...)
 
-	d, err := os.Getwd()
-	if err != nil {
-		failf("failed to get current working directory: %v", err)
-	}
+	debugf("%v: %v (%v)\n", argv[0], argv[1:], os.Getenv("GOPATH"))
 
-	var vendors []string
-
-	for {
-		// check for presence of .gopath file first; doesn't make sense to
-		// _vendor in same directory
-
-		gpf, err := os.Stat(filepath.Join(d, FilenameGOPATH))
-		if err == nil && gpf.Mode().IsRegular() {
-			gopath = d
-			break
-		}
-
-		vd, err := os.Stat(filepath.Join(d, DirectoryVendor))
-		if err == nil && vd.IsDir() {
-			vendors = append(vendors, filepath.Join(d, DirectoryVendor))
-		}
-
-		nd := filepath.Dir(d)
-
-		if nd == d {
-			break
-		}
-
-		d = nd
-	}
-
-	for i := len(vendors) - 1; i >= 0; i-- {
-		gopath = vendors[i] + string(filepath.ListSeparator) + gopath
-	}
-
-	env := []string{"GOPATH=" + gopath}
-
-	for _, v := range os.Environ() {
-		vs := strings.SplitN(v, "=", 2)
-
-		if vs[0] != "GOPATH" {
-			env = append(env, v)
-		}
-	}
-
-	argv := append([]string{rgp}, os.Args[1:]...)
-
-	err = syscall.Exec(argv[0], argv, env)
+	err = syscall.Exec(argv[0], argv, os.Environ())
 	if err != nil {
 		failf("failed exec %v: %v\n", rgp, err)
 	}
@@ -132,4 +85,11 @@ func lookPath(file string, pathList []string) (string, []string, error) {
 func failf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, args...)
 	os.Exit(1)
+}
+
+func debugf(format string, args ...interface{}) {
+	if debug {
+		fmt.Printf(format, args...)
+		os.Stdout.Sync()
+	}
 }
